@@ -11,6 +11,7 @@ import hudson.model.Node;
 import hudson.model.Run;
 import hudson.remoting.Callable;
 import hudson.tasks.BuildWrapper;
+import org.jenkinsci.remoting.RoleChecker;
 import org.kohsuke.stapler.DataBoundConstructor;
 
 import java.io.IOException;
@@ -143,6 +144,10 @@ public class ProcessCleanupBuildWrapper extends BuildWrapper {
     private static class LocalPID implements Callable<String,RuntimeException> {
         public String call() throws RuntimeException {
             return ManagementFactory.getRuntimeMXBean().getName().split("@")[0];
+        }
+
+        @Override
+        public void checkRoles(RoleChecker checker) throws SecurityException {
         }
     }
 }

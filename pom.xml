@@ -2,9 +2,9 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>org.jvnet.hudson.plugins</groupId>
-        <artifactId>plugin</artifactId>
-        <version>1.391</version>
+            <groupId>org.jenkins-ci.plugins</groupId>
+            <artifactId>plugin</artifactId>
+            <version>1.625.3</version>
     </parent>
     <artifactId>process-cleanup</artifactId>
     <version>1.0-SNAPSHOT</version>
@@ -26,12 +26,5 @@
             <name>Tom Huybrechts</name>
         </developer>
     </developers>
-
-    <repositories>
-      <repository>
-        <id>m.g.o-public</id>
-        <url>http://maven.glassfish.org/content/groups/public/</url>
-      </repository>
-    </repositories>
     
 </project>
