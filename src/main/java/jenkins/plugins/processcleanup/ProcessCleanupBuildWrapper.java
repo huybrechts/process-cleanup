@@ -63,7 +63,6 @@ public class ProcessCleanupBuildWrapper extends BuildWrapper {
 
     private void killProcesses(AbstractBuild build, Launcher launcher, final BuildListener listener) throws IOException, InterruptedException {
 
-        try {
             final Charset charset = build.getCharset();
 
             class PidFilter extends LineTransformationOutputStream {
@@ -90,33 +89,35 @@ public class ProcessCleanupBuildWrapper extends BuildWrapper {
 
             PidFilter filter = new PidFilter();
 
-            String handleExe = build.getBuiltOn().getRootPath().child("handle.exe").getRemote();
-            launcher.launch().cmds(handleExe, "-accepteula", build.getWorkspace().getRemote()).stdout(filter).join();
+            Node builtOn = build.getBuiltOn();
+            if (builtOn != null && launcher.getChannel() != null) {
+                try {
+                    String handleExe = builtOn.getRootPath().child("handle.exe").getRemote();
+                    launcher.launch().cmds(handleExe, "-accepteula", build.getWorkspace().getRemote()).stdout(filter).join();
 
-            String localPID = build.getWorkspace().act(new LocalPID());
+                    String localPID = build.getWorkspace().act(new LocalPID());
 
-            Set<String> pids = filter.getPids();
-            pids.remove(localPID);
+                    Set<String> pids = filter.getPids();
+                    pids.remove(localPID);
 
-            if (!pids.isEmpty()) {
-                listener.getLogger().println("[process-cleanup] pids to kill: " + pids);
+                    if (!pids.isEmpty()) {
+                        listener.getLogger().println("[process-cleanup] pids to kill: " + pids);
 
-                List<String> args = new ArrayList<String>();
-                args.add("taskkill.exe");
-                args.add("/F");
-                args.add("/T");
-                for (String pid: pids) {
-                    args.add("/PID");
-                    args.add(pid);
+                        List<String> args = new ArrayList<String>();
+                        args.add("taskkill.exe");
+                        args.add("/F");
+                        args.add("/T");
+                        for (String pid: pids) {
+                            args.add("/PID");
+                            args.add(pid);
+                        }
+
+                        launcher.launch().cmds(args).stdout(listener).join();
+                    }
+                } catch (IOException | RuntimeException e) {
+                    e.printStackTrace(listener.error("Could not clean up processes"));
                 }
-
-                launcher.launch().cmds(args).stdout(listener).join();
             }
-        } catch (IOException e) {
-            e.printStackTrace(listener.error("Could not clean up processes"));
-        } catch (RuntimeException e) {
-            e.printStackTrace(listener.error("Could not clean up processes"));
-        }
 
     }
 
