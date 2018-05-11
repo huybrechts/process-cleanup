@@ -1,19 +1,5 @@
 package jenkins.plugins.processcleanup;
 
-import hudson.Extension;
-import hudson.FilePath;
-import hudson.Launcher;
-import hudson.console.LineTransformationOutputStream;
-import hudson.model.AbstractBuild;
-import hudson.model.BuildListener;
-import hudson.model.Descriptor;
-import hudson.model.Node;
-import hudson.model.Run;
-import hudson.remoting.Callable;
-import hudson.tasks.BuildWrapper;
-import org.jenkinsci.remoting.RoleChecker;
-import org.kohsuke.stapler.DataBoundConstructor;
-
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.nio.ByteBuffer;
@@ -25,13 +11,32 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.jenkinsci.remoting.RoleChecker;
+import org.kohsuke.stapler.DataBoundConstructor;
+
+import hudson.Extension;
+import hudson.FilePath;
+import hudson.Launcher;
+import hudson.console.LineTransformationOutputStream;
+import hudson.model.AbstractBuild;
+import hudson.model.BuildListener;
+import hudson.model.Computer;
+import hudson.model.Descriptor;
+import hudson.model.Node;
+import hudson.remoting.Callable;
+import hudson.tasks.BuildWrapper;
+
 public class ProcessCleanupBuildWrapper extends BuildWrapper {
 
     public static volatile boolean DISABLED = false;
 
     private transient final Environment NOOP = new Environment() {
+        
         @Override
-        public boolean tearDown(AbstractBuild build, BuildListener listener) throws IOException, InterruptedException {
+        public boolean tearDown(
+                @SuppressWarnings("rawtypes") final AbstractBuild build,
+                BuildListener listener) throws IOException, InterruptedException {
+            
             return true;
         }
     };
@@ -40,11 +45,44 @@ public class ProcessCleanupBuildWrapper extends BuildWrapper {
     public ProcessCleanupBuildWrapper() {}
 
     @Override
-    public Environment setUp(AbstractBuild build, final Launcher launcher, BuildListener listener) throws IOException, InterruptedException {
-        if (DISABLED) return NOOP;
+    public Environment setUp(
+            @SuppressWarnings("rawtypes") final AbstractBuild build,
+            final Launcher launcher,
+            final BuildListener listener) throws IOException, InterruptedException {
+        
+        if (DISABLED) {
+            return NOOP;
+        }
+        
+        if (build == null) {
+            // This really should not happen, but FindBugs is complaining about it.
+            throw new IllegalArgumentException("Given build is null.");
+        }
+        
+        final Node node = build.getBuiltOn();
+        
+        if (node == null) {
+            throw new IllegalStateException("Slave that this build run on no longer exists.");
+        }
+        
+        final Computer computer = node.toComputer();
+        
+        if (computer == null) {
+            throw new IllegalStateException("Node '" + node.getNodeName() + "' does not have executors.");
+        }
+        
+        final Boolean isUnix = computer.isUnix();
+        
+        if (isUnix == null) {
+            throw new IllegalStateException("Computer '" + computer.getName() + "' is disconnected.");
+        }
+        
+        if (isUnix) {
+            return NOOP;
+        }
 
         try {
-            installHandle(build.getBuiltOn());
+            installHandle(node);
         } catch (IOException e) {
             e.printStackTrace(listener.error("Could not install handle.exe"));
             return NOOP;
@@ -53,16 +91,29 @@ public class ProcessCleanupBuildWrapper extends BuildWrapper {
         killProcesses(build, launcher, listener);
 
         return new Environment() {
+            
             @Override
-            public boolean tearDown(AbstractBuild build, BuildListener listener) throws IOException, InterruptedException {
+            public boolean tearDown(
+                    @SuppressWarnings("rawtypes") final AbstractBuild build,
+                    final BuildListener listener) throws IOException, InterruptedException {
+                
                 killProcesses(build, launcher, listener);
                 return true;
             }
         };
     }
 
-    private void killProcesses(AbstractBuild build, Launcher launcher, final BuildListener listener) throws IOException, InterruptedException {
+    private void killProcesses(
+            @SuppressWarnings("rawtypes") final AbstractBuild build,
+            final Launcher launcher,
+            final BuildListener listener) throws IOException, InterruptedException {
 
+        final Node node = build.getBuiltOn();
+        
+        if (node == null) {
+            throw new IllegalStateException("Slave that this build run on no longer exists.");
+        }
+        
         try {
             final Charset charset = build.getCharset();
 
@@ -90,7 +141,7 @@ public class ProcessCleanupBuildWrapper extends BuildWrapper {
 
             PidFilter filter = new PidFilter();
 
-            String handleExe = build.getBuiltOn().getRootPath().child("handle.exe").getRemote();
+            String handleExe = node.getRootPath().child("handle.exe").getRemote();
             launcher.launch().cmds(handleExe, "-accepteula", build.getWorkspace().getRemote()).stdout(filter).join();
 
             String localPID = build.getWorkspace().act(new LocalPID());
@@ -127,11 +178,6 @@ public class ProcessCleanupBuildWrapper extends BuildWrapper {
         }
     }
 
-    @Override
-    public Launcher decorateLauncher(AbstractBuild build, Launcher launcher, BuildListener listener) throws IOException, InterruptedException, Run.RunnerAbortedException {
-        return launcher;
-    }
-
     @Extension
     public static class DescriptorImpl extends Descriptor<BuildWrapper> {
 
@@ -141,13 +187,16 @@ public class ProcessCleanupBuildWrapper extends BuildWrapper {
         }
     }
 
-    private static class LocalPID implements Callable<String,RuntimeException> {
+    private static final class LocalPID implements Callable<String, RuntimeException> {
+        
+        private static final long serialVersionUID = -1472189547109950350L;
+
         public String call() throws RuntimeException {
+            
             return ManagementFactory.getRuntimeMXBean().getName().split("@")[0];
         }
 
         @Override
-        public void checkRoles(RoleChecker checker) throws SecurityException {
-        }
+        public void checkRoles(RoleChecker checker) throws SecurityException {}
     }
 }
