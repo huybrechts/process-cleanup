@@ -41,11 +41,23 @@ public class ProcessCleanupBuildWrapper extends BuildWrapper {
 
     @Override
     public Environment setUp(AbstractBuild build, final Launcher launcher, BuildListener listener) throws IOException, InterruptedException {
-        if (DISABLED) return NOOP;
+        if (DISABLED || launcher.isUnix()) return NOOP;
+
+        Node builtOn = build.getBuiltOn();
+
+        if (builtOn == null) {
+            return NOOP;
+        }
+
+        FilePath root = builtOn.getRootPath();
+
+        if (root == null) {
+            return NOOP;
+        }
 
         try {
-            installHandle(build.getBuiltOn());
-        } catch (IOException e) {
+            installHandle(root);
+        } catch (Exception e) {
             e.printStackTrace(listener.error("Could not install handle.exe"));
             return NOOP;
         }
@@ -55,7 +67,11 @@ public class ProcessCleanupBuildWrapper extends BuildWrapper {
         return new Environment() {
             @Override
             public boolean tearDown(AbstractBuild build, BuildListener listener) throws IOException, InterruptedException {
-                killProcesses(build, launcher, listener);
+                try {
+                    killProcesses(build, launcher, listener);
+                } catch (IOException e) {
+                    listener.getLogger().println(e.getMessage());
+                }
                 return true;
             }
         };
@@ -67,7 +83,8 @@ public class ProcessCleanupBuildWrapper extends BuildWrapper {
 
             class PidFilter extends LineTransformationOutputStream {
 
-                private Pattern PID_PATTERN = Pattern.compile(".*pid: (\\d*).*");
+                private final Pattern PID_PATTERN = Pattern.compile(".*pid: (\\d*).*");
+                private Matcher m;
 
                 private Set<String> pids = new HashSet<String>();
 
@@ -78,7 +95,11 @@ public class ProcessCleanupBuildWrapper extends BuildWrapper {
                 @Override
                 protected void eol(byte[] bytes, int len) throws IOException {
                     String line = charset.decode(ByteBuffer.wrap(bytes, 0, len)).toString().trim();
-                    Matcher m = PID_PATTERN.matcher(line);
+                    if (m != null) {
+                        m.reset(line);
+                    } else {
+                        m = PID_PATTERN.matcher(line);
+                    }
                     if (m.matches()) {
                         pids.add(m.group(1));
                         listener.getLogger().println(line);
@@ -87,15 +108,15 @@ public class ProcessCleanupBuildWrapper extends BuildWrapper {
 
             }
 
-            PidFilter filter = new PidFilter();
-
             Node builtOn = build.getBuiltOn();
-            if (builtOn != null && launcher.getChannel() != null) {
-                try {
-                    String handleExe = builtOn.getRootPath().child("handle.exe").getRemote();
-                    launcher.launch().cmds(handleExe, "-accepteula", build.getWorkspace().getRemote()).stdout(filter).join();
+            FilePath root = builtOn != null ? builtOn.getRootPath() : null;
+            FilePath workspace = build.getWorkspace();
+            if (root != null && workspace != null && launcher.getChannel() != null) {
+                try (PidFilter filter = new PidFilter()) {
+                    String handleExe = root.child("handle.exe").getRemote();
+                    launcher.launch().cmds(handleExe, "-accepteula", workspace.getRemote()).stdout(filter).join();
 
-                    String localPID = build.getWorkspace().act(new LocalPID());
+                    String localPID = workspace.act(new LocalPID());
 
                     Set<String> pids = filter.getPids();
                     pids.remove(localPID);
@@ -121,16 +142,11 @@ public class ProcessCleanupBuildWrapper extends BuildWrapper {
 
     }
 
-    private void installHandle(Node node) throws IOException, InterruptedException {
-        FilePath handle = node.getRootPath().child("handle.exe");
+    private void installHandle(FilePath root) throws IOException, InterruptedException {
+        FilePath handle = root.child("handle.exe");
         if (!handle.exists()) {
             handle.copyFrom(getClass().getResource("handle.exe"));
         }
-    }
-
-    @Override
-    public Launcher decorateLauncher(AbstractBuild build, Launcher launcher, BuildListener listener) throws IOException, InterruptedException, Run.RunnerAbortedException {
-        return launcher;
     }
 
     @Extension
@@ -143,12 +159,12 @@ public class ProcessCleanupBuildWrapper extends BuildWrapper {
     }
 
     private static class LocalPID implements Callable<String,RuntimeException> {
-        public String call() throws RuntimeException {
+        public String call() {
             return ManagementFactory.getRuntimeMXBean().getName().split("@")[0];
         }
 
         @Override
-        public void checkRoles(RoleChecker checker) throws SecurityException {
+        public void checkRoles(RoleChecker checker) {
         }
     }
 }
