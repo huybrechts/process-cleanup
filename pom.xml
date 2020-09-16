@@ -18,6 +18,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <findbugs.failOnError>false</findbugs.failOnError>
         <changelist>1.1-SNAPSHOT</changelist>
+        <java.level>8</java.level>
     </properties>
 
 	<scm>
